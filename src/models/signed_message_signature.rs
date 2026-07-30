@@ -35,7 +35,7 @@ impl SignedMessageSignature {
     }
 }
 ///
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 pub enum V {
     #[serde(rename = "0")]
     Variant0,
@@ -43,8 +43,62 @@ pub enum V {
     Variant1,
 }
 
+/// Fireblocks serializes the recovery id as a JSON number in RAW signing
+/// responses while other surfaces use the string form; accept both.
+impl<'de> serde::Deserialize<'de> for V {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match &value {
+            serde_json::Value::String(text) if text == "0" => Ok(Self::Variant0),
+            serde_json::Value::String(text) if text == "1" => Ok(Self::Variant1),
+            serde_json::Value::Number(number) if number.as_u64() == Some(0) => {
+                Ok(Self::Variant0)
+            }
+            serde_json::Value::Number(number) if number.as_u64() == Some(1) => {
+                Ok(Self::Variant1)
+            }
+            other => Err(serde::de::Error::custom(format!(
+                "invalid signature v value: {other}"
+            ))),
+        }
+    }
+}
+
 impl Default for V {
     fn default() -> V {
         Self::Variant0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_v_from_number() {
+        let signature: SignedMessageSignature =
+            serde_json::from_str(r#"{"r":"aa","s":"bb","v":1}"#).unwrap();
+        assert_eq!(signature.v, Some(V::Variant1));
+    }
+
+    #[test]
+    fn deserializes_v_from_string() {
+        let signature: SignedMessageSignature =
+            serde_json::from_str(r#"{"r":"aa","s":"bb","v":"0"}"#).unwrap();
+        assert_eq!(signature.v, Some(V::Variant0));
+    }
+
+    #[test]
+    fn rejects_out_of_range_v() {
+        let result = serde_json::from_str::<SignedMessageSignature>(
+            r#"{"r":"aa","s":"bb","v":27}"#,
+        );
+        assert!(
+            matches!(result, Err(_)),
+            "v=27 must be rejected, got {result:?}"
+        );
     }
 }
