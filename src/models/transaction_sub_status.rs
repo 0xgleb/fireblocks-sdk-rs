@@ -243,8 +243,16 @@ pub enum TransactionSubStatus {
     SmartContractExecutionFailed,
     #[serde(rename = "TOO_LONG_MEMPOOL_CHAIN")]
     TooLongMempoolChain,
+    #[serde(rename = "TRANSIENT_NODE_ERROR_RETRY")]
+    TransientNodeErrorRetry,
     #[serde(rename = "")]
     Empty,
+    /// Catch-all for sub-statuses introduced by Fireblocks after this SDK
+    /// version. Deserializing an unrecognized value must not fail the whole
+    /// transaction poll; terminality is decided by `TransactionStatus`, not
+    /// the sub-status.
+    #[serde(other, rename = "UNKNOWN_SUB_STATUS")]
+    Unknown,
 }
 
 impl std::fmt::Display for TransactionSubStatus {
@@ -368,7 +376,9 @@ impl std::fmt::Display for TransactionSubStatus {
             Self::RejectedByBlockchain => write!(f, "REJECTED_BY_BLOCKCHAIN"),
             Self::SmartContractExecutionFailed => write!(f, "SMART_CONTRACT_EXECUTION_FAILED"),
             Self::TooLongMempoolChain => write!(f, "TOO_LONG_MEMPOOL_CHAIN"),
+            Self::TransientNodeErrorRetry => write!(f, "TRANSIENT_NODE_ERROR_RETRY"),
             Self::Empty => write!(f, ""),
+            Self::Unknown => write!(f, "UNKNOWN_SUB_STATUS"),
         }
     }
 }
@@ -376,5 +386,31 @@ impl std::fmt::Display for TransactionSubStatus {
 impl Default for TransactionSubStatus {
     fn default() -> TransactionSubStatus {
         Self::Variant3RdPartyProcessing
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserializes_transient_node_error_retry() {
+        let parsed: TransactionSubStatus =
+            serde_json::from_str("\"TRANSIENT_NODE_ERROR_RETRY\"").unwrap();
+        assert_eq!(parsed, TransactionSubStatus::TransientNodeErrorRetry);
+    }
+
+    #[test]
+    fn deserializes_unrecognized_sub_status_to_catch_all() {
+        let parsed: TransactionSubStatus =
+            serde_json::from_str("\"SOME_FUTURE_SUB_STATUS\"").unwrap();
+        assert_eq!(parsed, TransactionSubStatus::Unknown);
+    }
+
+    #[test]
+    fn known_sub_status_still_deserializes_exactly() {
+        let parsed: TransactionSubStatus =
+            serde_json::from_str("\"BLOCKED_BY_POLICY\"").unwrap();
+        assert_eq!(parsed, TransactionSubStatus::BlockedByPolicy);
     }
 }
