@@ -44,24 +44,24 @@ pub enum V {
 }
 
 /// Fireblocks serializes the recovery id as a JSON number in RAW signing
-/// responses while other surfaces use the string form; accept both.
+/// responses while other surfaces use the string form; accept both, and
+/// accept the pre-EIP-155 legacy encoding (27/28) normalized to its parity.
 impl<'de> serde::Deserialize<'de> for V {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = serde_json::Value::deserialize(deserializer)?;
-        match &value {
-            serde_json::Value::String(text) if text == "0" => Ok(Self::Variant0),
-            serde_json::Value::String(text) if text == "1" => Ok(Self::Variant1),
-            serde_json::Value::Number(number) if number.as_u64() == Some(0) => {
-                Ok(Self::Variant0)
-            }
-            serde_json::Value::Number(number) if number.as_u64() == Some(1) => {
-                Ok(Self::Variant1)
-            }
-            other => Err(serde::de::Error::custom(format!(
-                "invalid signature v value: {other}"
+        let numeric = match &value {
+            serde_json::Value::String(text) => text.parse::<u64>().ok(),
+            serde_json::Value::Number(number) => number.as_u64(),
+            _ => None,
+        };
+        match numeric {
+            Some(0) | Some(27) => Ok(Self::Variant0),
+            Some(1) | Some(28) => Ok(Self::Variant1),
+            _ => Err(serde::de::Error::custom(format!(
+                "invalid signature v value: {value}"
             ))),
         }
     }
@@ -92,13 +92,24 @@ mod tests {
     }
 
     #[test]
+    fn deserializes_legacy_v_to_parity() {
+        let signature: SignedMessageSignature =
+            serde_json::from_str(r#"{"r":"aa","s":"bb","v":27}"#).unwrap();
+        assert_eq!(signature.v, Some(V::Variant0));
+
+        let signature: SignedMessageSignature =
+            serde_json::from_str(r#"{"r":"aa","s":"bb","v":28}"#).unwrap();
+        assert_eq!(signature.v, Some(V::Variant1));
+    }
+
+    #[test]
     fn rejects_out_of_range_v() {
         let result = serde_json::from_str::<SignedMessageSignature>(
-            r#"{"r":"aa","s":"bb","v":27}"#,
+            r#"{"r":"aa","s":"bb","v":29}"#,
         );
         assert!(
             matches!(result, Err(_)),
-            "v=27 must be rejected, got {result:?}"
+            "v=29 must be rejected, got {result:?}"
         );
     }
 }
